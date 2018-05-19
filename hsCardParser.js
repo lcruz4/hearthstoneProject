@@ -2,6 +2,24 @@ const fs = require("fs");
 const db = require("./db.js");
 const startup = require("./startup.js");
 const CARDCOLLECTIONSTABLE = db.CARDCOLLECTIONSTABLE;
+const setTrans = {
+    BRM: "Blackrock Mountain",
+    CORE: "Basic/Free",
+    EXPERT1: "Expert",
+    GANGS: "Mean Streets of Gadgetzan",
+    GILNEAS: "The Witchwood",
+    GVG: "Goblins vs. Gnomes",
+    HERO_SKINS: "Hero",
+    HOF: "Hall of Fame",
+    ICECROWN: "Knights of the Frozen Throne",
+    KARA: "One Night in Karazhan",
+    LOE: "League of Explorers",
+    LOOTAPALOOZA: "Kobolds & Catacombs",
+    NAXX: "Curse of Naxxramas",
+    OG: "Whispers of the Old Gods",
+    TGT: "The Grand Tournament",
+    UNGORO: "Journey to Un'Goro"
+};
 
 startup.start(getCardCollection);
 
@@ -26,23 +44,41 @@ function getCardCollection(responseStr) {
         let insertsUpdatesArr = getInsertsAndUpdatesArr(queryResponse.rows, mergeCardCollections(normalCards, goldenCards));
         let insertsArr = insertsUpdatesArr[0];
         let updatesArr = insertsUpdatesArr[1];
+        let insertLen = insertsArr.length;
+        let updateLen = updatesArr.length;
+        let insertPlural = insertLen > 1;
+        let updatePlural = updateLen > 1;
 
-        if (insertsArr.length === 0 && updatesArr.length === 0) {
+        if (insertLen === 0 && updateLen === 0) {
             console.log(`${username}'s collection is up to date.`);
         }
-        if (insertsArr.length > 0) {
-            console.log(`Inserting ${insertsArr.length} card${insertsArr.length > 1 ? "s" : ""} into ${username}'s collection.`);
-            db.insertCardCollection(username, insertsArr);
+        if (insertLen > 0) {
+            console.log(`Inserting ${insertLen} card${insertPlural ? "s" : ""} into ${username}'s collection.\n`);
+            db.insertCardCollection(username, insertsArr).then(reportSuccessfulInsert.bind(null, {
+                insertLen: insertLen,
+                insertPlural: insertPlural,
+                insertsArr: insertsArr,
+                cardsArr: cardsArr
+            })); 
         }
-        if (updatesArr.length > 0) {
-            console.log(`Updating ${updatesArr.length} card${updatesArr.length > 1 ? "s" : ""} in ${username}'s collection.`);
-            db.updateCardCollection(username, updatesArr);
+        if (updateLen > 0) {
+            console.log(`Updating ${updateLen} card${updateLen > 1 ? "s" : ""} in ${username}'s collection.\n`);
+            db.updateCardCollection(username, updatesArr).then(reportSuccessfulUpdate.bind(null, {
+                insertLen: insertLen,
+                updateLen: updateLen,
+                updatePlural: updatePlural,
+                updatesArr: updatesArr,
+                cardsArr: cardsArr,
+                collCards: queryResponse.rows
+            })); 
         }
+
+
     });
 }
 
 function handleReadNormalFile(resolve, dbArr, golden, err, data) {
-    let lines = data.split("\r\n").slice(1);
+    let lines = data && data.split("\r\n").slice(1) || [];
     let cardArr = [];
 
     for (let i = 0, n = lines.length; i < n; i++) {
@@ -109,3 +145,60 @@ function getInsertsAndUpdatesArr(curCollection, inputCollection) {
 
     return retArr;
 };
+
+function reportSuccessfulInsert(args) {
+    let insertLen = args.insertLen;
+    let insertPlural = args.insertPlural;
+    let insertsArr = args.insertsArr;
+    let cardsArr = args.cardsArr;
+    let msgArr = [];
+
+    console.log(`The following ${insertLen} new card${insertPlural ? "s" : ""} ${insertPlural ? "were" : "was"} successfully inserted:\n`);
+    for (let i = 0; i < insertLen; i++) {
+        let cardColl = insertsArr[i];
+        let normalCount = cardColl.normalCount;
+        let goldenCount = cardColl.goldenCount;
+        let totalCount = normalCount + goldenCount;
+        let card = cardsArr.find(card => card.id === cardColl.id);
+        let statsArr = [
+            `${card.name}`,
+            `mana: ${card.cost}`,
+            ...(card.attack == null ? [] : [`attack: ${card.attack}`]),
+            ...(card.health == null ? [] : [`health: ${card.health}`]),
+            `rarity: ${card.rarity}`,
+            `class: ${card.cardClass}`,
+            `set: ${setTrans[card.set]}`,
+            `text: ${card.text}`
+        ];
+
+        msgArr.push(statsArr.join("\n\t"));
+    }
+
+    console.log(msgArr.join("\n\n"));
+}
+
+function reportSuccessfulUpdate(args) {
+    let insertLen = args.insertLen;
+    let updateLen = args.updateLen;
+    let updatePlural = args.updatePlural;
+    let updatesArr = args.updatesArr;
+    let cardsArr = args.cardsArr;
+    let collCards = args.collCards;
+    let msgArr = [];
+
+    console.log(`${insertLen > 0 ? "\n\n" : ""}The following ${updateLen} card count${updatePlural ? "s" : ""} ${updatePlural ? "have" : "has"} been updated:\n`);
+    for (let i = 0; i < updateLen; i++) {
+        let card = updatesArr[i];
+        let name = cardsArr.find(cardDef => cardDef.id === card.id).name;
+        let oldCard = collCards.find(cardFromColl => cardFromColl.card_id === card.id);
+        let statsArr = [
+            name,
+            ...(oldCard.normal_count !== card.normalCount ? [`count: ${oldCard.normal_count} -> ${card.normalCount}`] : []),
+            ...(oldCard.golden_count !== card.goldenCount ? [`golden: ${oldCard.golden_count} -> ${card.goldenCount}`] : [])
+        ];
+
+        msgArr.push(statsArr.join("\n\t"));
+    }
+
+    console.log(msgArr.join("\n\n"));
+}
